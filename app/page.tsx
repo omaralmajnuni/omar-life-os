@@ -1,41 +1,35 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import {
-  Check, Flame, CheckCircle2, Sparkles, Moon, Sun,
+  Check, Flame, CheckCircle2, Sparkles, Moon, Sun, User,
   BookOpen, Star, Heart, TrendingUp, Lightbulb, SunMedium, Plus, Trash2, Activity, Droplets, Footprints, Pin
 } from "lucide-react";
-import { getAIInsights } from "../lib/aiInsights";
-import { PageContainer } from "../components/PageContainer";
-import { SectionCard } from "../components/SectionCard";
+import Link from "next/link";
+import { supabase } from "@/lib/supabase";
 import { StatCard } from "../components/StatCard";
+import DailyCoachCard from "../components/DailyCoachCard";
+import { useTrialStatus } from "@/hooks/useTrialStatus";
+import { TrialExpiredScreen } from "@/components/TrialExpiredScreen";
+import { useTheme } from "@/components/ThemeProvider";
+
+const PRAYER_NAMES = [
+  { id: "fajr", name: "الفجر" }, { id: "dhuhr", name: "الظهر" },
+  { id: "asr", name: "العصر" }, { id: "maghrib", name: "المغرب" },
+  { id: "isha", name: "العشاء" },
+];
 
 export default function Home() {
-  // --- Theme ---
-  const [darkMode, setDarkMode] = useState(true);
+  const router = useRouter();
 
-  useEffect(() => {
-    const saved = localStorage.getItem("lifeos_theme");
-    if (saved !== null) setDarkMode(saved === "dark");
-  }, []);
-
-  const toggleTheme = () => {
-    setDarkMode(prev => {
-      const next = !prev;
-      localStorage.setItem("lifeos_theme", next ? "dark" : "light");
-      return next;
-    });
-  };
-
-  const bg = darkMode ? "bg-zinc-950 text-zinc-100" : "bg-slate-50 text-zinc-900";
-  const card = darkMode ? "bg-zinc-900 border-zinc-800" : "bg-white border-zinc-200 shadow-sm";
-  const cardInner = darkMode ? "bg-zinc-950" : "bg-slate-100";
-  const muted = darkMode ? "text-zinc-500" : "text-zinc-400";
-  const mutedBorder = darkMode ? "border-zinc-800" : "border-zinc-200";
-  const inputBg = darkMode ? "bg-zinc-950 border-zinc-800" : "bg-white border-zinc-200";
+  const { theme, toggleTheme, classes } = useTheme();
+  const darkMode = theme === "dark";
+  const { bg, card, cardInner, muted, mutedBorder, inputBg } = classes;
 
   // --- State ---
   const [isLoaded, setIsLoaded] = useState(false);
+  const [userId, setUserId] = useState<string>(""); // مفتاح عزل بيانات كل مستخدم
   const [tasks, setTasks] = useState<{ id: number; title: string; completed: boolean; isPinned?: boolean; pinned?: boolean }[]>([]);
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskIsPinned, setNewTaskIsPinned] = useState(false);
@@ -45,11 +39,6 @@ export default function Home() {
   const [newHabitType, setNewHabitType] = useState<"positive" | "negative">("positive");
   const [newHabitIsPinned, setNewHabitIsPinned] = useState(false);
 
-  const PRAYER_NAMES = [
-    { id: "fajr", name: "الفجر" }, { id: "dhuhr", name: "الظهر" },
-    { id: "asr", name: "العصر" }, { id: "maghrib", name: "المغرب" },
-    { id: "isha", name: "العشاء" },
-  ];
   const [prayers, setPrayers] = useState<Record<string, { completed: boolean; khushu: string }>>({
     fajr: { completed: false, khushu: "" }, dhuhr: { completed: false, khushu: "" },
     asr: { completed: false, khushu: "" }, maghrib: { completed: false, khushu: "" },
@@ -69,88 +58,176 @@ export default function Home() {
   const [weightTarget, setWeightTarget] = useState<number | string>(4);
   const [weightStart, setWeightStart] = useState<number | string>(82.5);
   const [goalsProgress, setGoalsProgress] = useState(0);
-  const [yesterdayComparison, setYesterdayComparison] = useState<{ diff: number; yesterdayScore: number } | null>(null);
+  const [yesterdayComparison, setYesterdayComparison] = useState<{ diff: number, yesterdayScore: number } | null>(null);
+  const [streak, setStreak] = useState(0);
 
-  // --- Load Data ---
+  const { isTrialExpired, isCheckingTrial, trialDaysLeft } = useTrialStatus();
+  const syncTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  // --- Load Data (مع عزل بيانات كل مستخدم بـ user_id) ---
   useEffect(() => {
-    const today = new Date().toISOString().split("T")[0];
-    const history = JSON.parse(localStorage.getItem("lifeos_history") || "[]");
-    const todayRecord = history.find((h: any) => h.date === today);
+    const loadData = async () => {
+      // 1) جلب المستخدم الحالي أولاً
+      const { data: { session } } = await supabase.auth.getSession();
+      const uid = session?.user?.id ?? "guest";
+      setUserId(uid);
 
-    if (todayRecord) {
-      if (todayRecord.tasks) setTasks(todayRecord.tasks);
-      if (todayRecord.habits) setHabits(todayRecord.habits);
-      if (todayRecord.prayers) setPrayers(todayRecord.prayers);
-      if (todayRecord.adhkar) setAdhkar(todayRecord.adhkar);
-      
-      if (todayRecord.quran) setQuran(todayRecord.quran);
-      else if (todayRecord.quranPages !== undefined) setQuran({ current: todayRecord.quranPages, target: 10 });
-      
-      if (todayRecord.water) setWater(todayRecord.water);
-      else if (todayRecord.waterIntake !== undefined) setWater({ current: todayRecord.waterIntake, target: 8 });
+      // 2) مفاتيح localStorage
+      const HISTORY_KEY = `lifeos_history_${uid}`;
+      const GOALS_KEY = `lifeos_goals_${uid}`;
+      const WEIGHT_KEY = `lifeos_weight_config_${uid}`;
 
-      if (todayRecord.calories) setCalories(todayRecord.calories);
-      if (todayRecord.steps) setSteps(todayRecord.steps);
-      if (todayRecord.weight !== undefined) setWeight(todayRecord.weight);
-    } else {
-      let carriedTasks: any[] = [];
-      let carriedHabits: any[] = [];
+      const today = new Date().toISOString().split("T")[0];
+
+      // 3) جلب بيانات التتبع اليومية من قاعدة البيانات
+      console.log("Home - جلب بيانات الصفحة الرئيسية للمستخدم:", uid);
+      const { data: dbLogs, error: logErr } = await supabase.from('goals')
+        .select('*')
+        .eq('user_id', uid)
+        .eq('period', 'daily_log');
       
+      console.log("Home - نتيجة جلب اليوميات من Supabase:", dbLogs, logErr);
+
+      let history: any[] = [];
+      if (dbLogs && dbLogs.length > 0) {
+        history = dbLogs.map(g => {
+          try { return JSON.parse(g.status || "{}"); } catch { return null; }
+        }).filter(Boolean);
+        history.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); // تحديث التخزين المحلي
+      } else {
+        history = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+      }
+
+      console.log("Home - History Loaded:", history.length, "days");
+
+      // Calculate localized Streak from history natively
       if (history.length > 0) {
-        const lastRecord = history[history.length - 1];
-        if (lastRecord.tasks) carriedTasks = lastRecord.tasks.filter((t: any) => t.isPinned || t.pinned).map((t: any) => ({ ...t, completed: false }));
-        if (lastRecord.habits) carriedHabits = lastRecord.habits.filter((h: any) => h.isPinned || h.pinned).map((h: any) => ({ ...h, completed: false }));
-      }
-      setTasks(carriedTasks);
-      setHabits(carriedHabits);
-      setPrayers({
-        fajr: { completed: false, khushu: "" }, dhuhr: { completed: false, khushu: "" },
-        asr: { completed: false, khushu: "" }, maghrib: { completed: false, khushu: "" },
-        isha: { completed: false, khushu: "" }
-      });
-      setAdhkar({ morning: false, evening: false });
-      setQuran({ current: 0, target: 10 });
-      setWater(prev => ({ ...prev, current: 0 }));
-      setCalories(prev => ({ ...prev, current: 0 }));
-      setSteps(prev => ({ ...prev, current: 0 }));
-    }
+        const activeDates = new Set(history.filter(h => (h.dailyScore || 0) > 0).map(h => h.date));
+        let currentStreak = 0;
+        let dateToCheck = new Date();
+        const yest = new Date();
+        yest.setDate(yest.getDate() - 1);
+        const todayStr = dateToCheck.toISOString().split("T")[0];
+        const yestStr = yest.toISOString().split("T")[0];
 
-    const savedGoals = localStorage.getItem("lifeos_goals");
-    if (savedGoals) {
-      const goals = JSON.parse(savedGoals);
-      if (goals.length > 0) {
-        const totalProgress = goals.reduce((acc: number, g: any) => acc + g.current / g.target, 0);
-        setGoalsProgress(Math.round((totalProgress / goals.length) * 100));
+        if (activeDates.has(todayStr) || activeDates.has(yestStr)) {
+          if (!activeDates.has(todayStr)) dateToCheck = yest; // Allow 1-day grace window before drop
+          while (true) {
+            const dStr = dateToCheck.toISOString().split("T")[0];
+            if (activeDates.has(dStr)) {
+              currentStreak++;
+              dateToCheck.setDate(dateToCheck.getDate() - 1);
+            } else break;
+          }
+        }
+        setStreak(currentStreak);
       }
-    }
 
-    try {
-      const hist = JSON.parse(localStorage.getItem("lifeos_history") || "[]");
-      const yesterdayDate = new Date();
-      yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-      const yDateStr = yesterdayDate.toISOString().split("T")[0];
-      const yRecord = hist.find((h: any) => h.date === yDateStr);
-      if (yRecord && todayRecord) {
-        setYesterdayComparison({ diff: todayRecord.dailyScore - yRecord.dailyScore, yesterdayScore: yRecord.dailyScore });
+      const todayRecord = history.find((h: any) => h.date === today);
+
+      if (todayRecord) {
+        if (todayRecord.tasks) setTasks(todayRecord.tasks);
+        if (todayRecord.habits) setHabits(todayRecord.habits);
+        if (todayRecord.prayers) setPrayers(todayRecord.prayers);
+        if (todayRecord.adhkar) setAdhkar(todayRecord.adhkar);
+        
+        if (todayRecord.quran) setQuran(todayRecord.quran);
+        else if (todayRecord.quranPages !== undefined) setQuran({ current: todayRecord.quranPages, target: 10 });
+        
+        if (todayRecord.water) setWater(todayRecord.water);
+        else if (todayRecord.waterIntake !== undefined) setWater({ current: todayRecord.waterIntake, target: 8 });
+
+        if (todayRecord.calories) setCalories(todayRecord.calories);
+        if (todayRecord.steps) setSteps(todayRecord.steps);
+        if (todayRecord.weight !== undefined) setWeight(todayRecord.weight);
+      } else {
+        let carriedTasks: any[] = [];
+        let carriedHabits: any[] = [];
+        
+        if (history.length > 0) {
+          const lastRecord = history[history.length - 1];
+          if (lastRecord.tasks) carriedTasks = lastRecord.tasks.filter((t: any) => t.isPinned || t.pinned).map((t: any) => ({ ...t, completed: false }));
+          if (lastRecord.habits) carriedHabits = lastRecord.habits.filter((h: any) => h.isPinned || h.pinned).map((h: any) => ({ ...h, completed: false }));
+        }
+        setTasks(carriedTasks);
+        setHabits(carriedHabits);
+        setPrayers({
+          fajr: { completed: false, khushu: "" }, dhuhr: { completed: false, khushu: "" },
+          asr: { completed: false, khushu: "" }, maghrib: { completed: false, khushu: "" },
+          isha: { completed: false, khushu: "" }
+        });
+        setAdhkar({ morning: false, evening: false });
+        setQuran({ current: 0, target: 10 });
+        setWater(prev => ({ ...prev, current: 0 }));
+        setCalories(prev => ({ ...prev, current: 0 }));
+        setSteps(prev => ({ ...prev, current: 0 }));
       }
-    } catch {}
 
-    const savedMonthlyWeight = localStorage.getItem("lifeos_weight_config");
-    if (savedMonthlyWeight) {
+      const savedGoals = localStorage.getItem(GOALS_KEY);
+      if (savedGoals) {
+        const goals = JSON.parse(savedGoals);
+        if (goals.length > 0) {
+          const totalProgress = goals.reduce((acc: number, g: any) => acc + g.current / g.target, 0);
+          setGoalsProgress(Math.round((totalProgress / goals.length) * 100));
+        }
+      }
+
       try {
-        const parsed = JSON.parse(savedMonthlyWeight);
-        if (parsed.start !== undefined) setWeightStart(parsed.start);
-        if (parsed.target !== undefined) setWeightTarget(parsed.target);
+        const yestDate = new Date();
+        yestDate.setDate(yestDate.getDate() - 1);
+        const yDateStr = yestDate.toISOString().split("T")[0];
+        const yRecord = history.find((h: any) => h.date === yDateStr);
+        if (yRecord && todayRecord) {
+          setYesterdayComparison({ diff: todayRecord.dailyScore - yRecord.dailyScore, yesterdayScore: yRecord.dailyScore });
+        }
       } catch {}
-    }
 
-    setIsLoaded(true);
+      const savedMonthlyWeight = localStorage.getItem(WEIGHT_KEY);
+      if (savedMonthlyWeight) {
+        try {
+          const parsed = JSON.parse(savedMonthlyWeight);
+          if (parsed.start !== undefined) setWeightStart(parsed.start);
+          if (parsed.target !== undefined) setWeightTarget(parsed.target);
+        } catch {}
+      }
+
+      // 3) جلب الأهداف من profile (Supabase)
+      if (session) {
+        console.log("Home - Fetching profile targets for user:", session.user.id);
+        const { data: profile, error: profError } = await supabase.from('profiles').select('*').eq('user_id', session.user.id).single();
+        console.log("Home - Fetch result:", profile, profError);
+        
+        if (profile) {
+          const w = parseFloat(profile.weight);
+          if (!isNaN(w)) setWeight(w);
+          
+          const targetLoss = parseFloat(profile.monthly_weight_goal || profile.target_weight_loss);
+          if (!isNaN(targetLoss)) setWeightTarget(targetLoss);
+
+          const tWater = parseInt(profile.water_goal);
+          if (!isNaN(tWater)) setWater(prev => ({ ...prev, target: tWater }));
+          
+          const tCal = parseInt(profile.calories_goal);
+          if (!isNaN(tCal)) setCalories(prev => ({ ...prev, target: tCal }));
+          
+          const tSteps = parseInt(profile.steps_goal);
+          if (!isNaN(tSteps)) setSteps(prev => ({ ...prev, target: tSteps }));
+        }
+      }
+
+      setIsLoaded(true);
+    };
+
+    loadData();
   }, []);
 
-  // --- Save Data ---
-  useEffect(() => {
-    if (!isLoaded) return;
 
+  // --- Save Data (مفاتيح مخصصة لكل مستخدم) ---
+  useEffect(() => {
+    if (!isLoaded || !userId) return;
+
+    const HISTORY_KEY = `lifeos_history_${userId}`;
     const today = new Date().toISOString().split("T")[0];
     const tasksDone = tasks.filter(t => t.completed).length;
     const habitsDone = habits.filter(h => h.completed).length;
@@ -174,24 +251,109 @@ export default function Home() {
       waterIntake: water.current
     };
 
-    const history = JSON.parse(localStorage.getItem("lifeos_history") || "[]");
+    const history = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
     const idx = history.findIndex((h: any) => h.date === today);
     if (idx > -1) history[idx] = record; else history.push(record);
-    localStorage.setItem("lifeos_history", JSON.stringify(history));
-  }, [isLoaded, tasks, habits, water, calories, steps, weight, prayers, adhkar, quran]);
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+
+    // --- حفظ السجل في Supabase لتجنب ضياعه عند تسجيل الخروج ---
+    if (syncTimeout.current) clearTimeout(syncTimeout.current);
+    syncTimeout.current = setTimeout(async () => {
+      console.log("Home - جاري حفظ بيانات اليومใน Supabase:", today, "user_id:", userId);
+      console.log("Home - Payload:", record);
+
+      const { data: existingTarget } = await supabase.from('goals')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('period', 'daily_log')
+        .eq('title', today)
+        .maybeSingle();
+
+      if (existingTarget && existingTarget.id) {
+         const { error } = await supabase.from('goals').update({
+           status: JSON.stringify(record),
+           current_value: mainScore
+         }).eq('id', existingTarget.id);
+         console.log("Home - نتيجة تحديث البيانات في Supabase:", error || "نجاح");
+      } else {
+         const { error } = await supabase.from('goals').insert({
+           user_id: userId,
+           title: today,
+           period: 'daily_log',
+           status: JSON.stringify(record),
+           current_value: mainScore,
+           target_value: 0
+         });
+         console.log("Home - نتيجة إدخال البيانات في Supabase:", error || "نجاح");
+      }
+    }, 2000);
+
+  }, [isLoaded, userId, tasks, habits, water, calories, steps, weight, prayers, adhkar, quran]);
 
   useEffect(() => {
-    if (isLoaded) {
-      localStorage.setItem("lifeos_weight_config", JSON.stringify({ 
+    if (isLoaded && userId) {
+      localStorage.setItem(`lifeos_weight_config_${userId}`, JSON.stringify({ 
         start: parseFloat(weightStart as string) || 0, 
         target: parseFloat(weightTarget as string) || 0 
       }));
     }
-  }, [weightStart, weightTarget, isLoaded]);
+  }, [weightStart, weightTarget, isLoaded, userId]);
+
+  // --- Profile Targets Sync (تزامن الأهداف مع Supabase) ---
+  const profileSyncTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    // نمنع الحفظ قبل اكتمال التحميل لعدم استبدال القيم الصحيحة بالقيم الافتراضية
+    if (!isLoaded || !userId) return;
+
+    if (profileSyncTimeout.current) clearTimeout(profileSyncTimeout.current);
+    
+    profileSyncTimeout.current = setTimeout(async () => {
+      console.log("Home - جاري حفظ بيانات البروفايل (الأهداف الصحية) في Supabase...");
+      
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData || !userData.user) return;
+
+      // 1) جلب الحقول الأصلية للحفاظ عليها (نفس منطق صفحة البروفايل)
+      const { data: myProfile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('user_id', userData.user.id)
+        .maybeSingle();
+
+      // 2) تجهيز Payload بالأسماء الصحيحة المطابقة لقاعدة البيانات
+      const payload = {
+        ...(myProfile || {}),
+        weight: parseFloat(weight as string) || null,
+        monthly_weight_goal: parseFloat(weightTarget as string) || null,
+        water_goal: water.target ? parseInt(water.target as any) : null,
+        calories_goal: calories.target ? parseInt(calories.target as any) : null,
+        steps_goal: steps.target ? parseInt(steps.target as any) : null,
+        user_id: userData.user.id
+      };
+
+      console.log("Home - الحقول التي تغيّرت:", { weight, weightTarget, water: water.target, calories: calories.target, steps: steps.target });
+      console.log("Home - Payload النهائي قبل الحفظ (profiles):", payload);
+
+      // 3) الحفظ بناءً على upsert مثل تحديث البروفايل تماماً
+      const { data: savedData, error: upsertError } = await supabase
+        .from('profiles')
+        .upsert(payload, { onConflict: 'user_id' })
+        .select('*')
+        .single();
+
+      console.log("Home - نتيجة الحفظ من Supabase (البروفايل):", savedData);
+      if (upsertError) console.error("Home - أي Error (البروفايل):", upsertError);
+
+    }, 2500); // ننتظر ثانيتين ونصف بعد آخر تعديل لتقليل الضغط على الخادم
+
+  }, [isLoaded, userId, weight, weightTarget, water.target, calories.target, steps.target]);
+
 
   // --- Goals Link ---
   const updateLinkedGoal = (linkedName: string, isCompleted: boolean) => {
-    const savedGoals = localStorage.getItem("lifeos_goals");
+    const GOALS_KEY = `lifeos_goals_${userId}`;
+    const savedGoals = localStorage.getItem(GOALS_KEY);
     if (!savedGoals) return;
     const goals: any[] = JSON.parse(savedGoals);
     let total = 0;
@@ -202,7 +364,7 @@ export default function Home() {
       return { ...goal, current: cur, completed: cur >= goal.target };
     });
     setGoalsProgress(Math.round((total / goals.length) * 100));
-    localStorage.setItem("lifeos_goals", JSON.stringify(updated));
+    localStorage.setItem(GOALS_KEY, JSON.stringify(updated));
   };
 
   // --- Task Ops ---
@@ -274,7 +436,11 @@ export default function Home() {
     setStepInput("");
   };
 
-  if (!isLoaded) return <div className={`min-h-screen ${bg}`} />; 
+  if (isTrialExpired) {
+    return <TrialExpiredScreen />;
+  }
+
+  if (!isLoaded || isCheckingTrial) return <div className={`min-h-screen ${bg}`} />; 
 
   // --- Computed Stats ---
   const tasksDoneCount = tasks.filter(t => t.completed).length;
@@ -290,16 +456,6 @@ export default function Home() {
     (adhkarDoneCount / 2) * 25 +
     Math.min((quran.current / Math.max(1, quran.target)) * 25, 25)
   );
-  const overallProgress = Math.round((tasksPercent + habitsPercent + finalReligiousScore) / 3);
-  const aiInsights = getAIInsights({ tasksPercent, habitsPercent, religiousScore: finalReligiousScore, goalsProgress, overallProgress });
-
-  const getScoreFeedback = (score: number) => {
-    if (score >= 90) return { text: "يوم أسطوري 🔥", color: "text-orange-400" };
-    if (score >= 70) return { text: "ممتاز 👏", color: "text-emerald-400" };
-    if (score >= 50) return { text: "جيد 👍", color: "text-blue-400" };
-    return { text: "تحتاج تشد حيلك ⚠️", color: darkMode ? "text-zinc-500" : "text-zinc-400" };
-  };
-  const feedback = getScoreFeedback(overallProgress);
 
   const parsedWeight = parseFloat(weight as string) || 0;
   const parsedStart = parseFloat(weightStart as string) || 0;
@@ -315,93 +471,58 @@ export default function Home() {
 
   return (
     <div className={`min-h-screen transition-colors duration-300 ${bg}`} dir="rtl">
-      <main className="px-3 py-3 md:px-8 md:py-8 pt-16 md:pt-24 pb-28 max-w-4xl mx-auto space-y-4 md:space-y-6">
+      <main className="px-4 py-4 md:px-8 md:py-8 md:pt-10 pb-6 md:pb-12 max-w-4xl mx-auto space-y-4 md:space-y-8 relative">
         
-        <div className="flex justify-end">
-          <button onClick={toggleTheme} className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all ${
-            darkMode ? "bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-zinc-200" : "bg-white border-zinc-200 text-zinc-500 hover:text-zinc-700 shadow-sm"
-          }`}>
-            {darkMode ? <><SunMedium className="w-3.5 h-3.5" /> فاتح</> : <><Moon className="w-3.5 h-3.5" /> داكن</>}
-          </button>
-        </div>
 
-        <header className="flex flex-col items-center text-center space-y-1">
-          <h1 className="text-2xl sm:text-4xl md:text-5xl font-bold tracking-tight bg-gradient-to-l from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
-            مجموعة بن أحمد
-          </h1>
-          <p className={`text-sm sm:text-lg font-medium ${muted}`}>لوحة التحكم اليومية</p>
-        </header>
-
-        <section className="relative group">
-          <div className="absolute -inset-1 bg-gradient-to-r from-emerald-500 to-cyan-500 rounded-[1.5rem] md:rounded-[2rem] blur opacity-20 group-hover:opacity-30 transition duration-1000" />
-          <div className={`relative border rounded-[1.5rem] md:rounded-[2rem] p-5 sm:p-8 md:p-12 flex flex-row items-center justify-between gap-4 shadow-2xl overflow-hidden ${card}`}>
-            <div className="z-10 flex flex-col items-start space-y-2">
-              <h2 className={`text-sm sm:text-xl font-black uppercase tracking-widest ${muted}`}>تقييم اليوم</h2>
-              <span className={`text-5xl sm:text-7xl md:text-8xl font-black drop-shadow-[0_0_15px_rgba(255,255,255,0.15)] ${darkMode ? "text-white" : "text-zinc-900"}`}>
-                {overallProgress}%
-              </span>
-              <p className={`text-xl sm:text-3xl md:text-4xl font-black italic tracking-tight ${feedback.color} transition-all`}>{feedback.text}</p>
-            </div>
-            <div className="relative flex items-center justify-center shrink-0 w-28 h-28 sm:w-44 sm:h-44 md:w-52 md:h-52">
-              <svg className="w-full h-full -rotate-90 overflow-visible">
-                <circle cx="50%" cy="50%" r="45" className={`fill-none stroke-[10px] sm:hidden ${darkMode ? "stroke-zinc-800" : "stroke-zinc-200"}`} />
-                <circle cx="50%" cy="50%" r="45" className="stroke-emerald-400 stroke-[10px] fill-none transition-all duration-1000 ease-out sm:hidden"
-                  strokeDasharray={2 * Math.PI * 45} strokeDashoffset={2 * Math.PI * 45 * (1 - overallProgress / 100)} strokeLinecap="round" />
-                <circle cx="50%" cy="50%" r="65" className={`fill-none stroke-[12px] hidden sm:block ${darkMode ? "stroke-zinc-800" : "stroke-zinc-200"}`} />
-                <circle cx="50%" cy="50%" r="65" className="stroke-emerald-400 stroke-[12px] fill-none transition-all duration-1000 ease-out hidden sm:block"
-                  strokeDasharray={2 * Math.PI * 65} strokeDashoffset={2 * Math.PI * 65 * (1 - overallProgress / 100)} strokeLinecap="round" />
-              </svg>
-              <div className="absolute inset-0 flex items-center justify-center">
-                <CheckCircle2 className="w-7 h-7 sm:w-10 sm:h-10 text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.5)]" />
-              </div>
-            </div>
+        <header className="relative w-full flex items-center justify-center py-2 mb-8">
+          
+          <div className="absolute right-0 top-1/2 -translate-y-1/2 z-20">
+            <Link href="/profile" className={`w-10 h-10 md:w-11 md:h-11 rounded-full flex items-center justify-center shrink-0 shadow-sm border overflow-hidden transition-all ${
+               darkMode ? "bg-zinc-800/80 hover:bg-zinc-700 border-zinc-700/50" : "bg-slate-100 hover:bg-slate-200 border-slate-200/80"
+            }`}>
+              <User className={`w-5 h-5 md:w-5 md:h-5 ${muted}`} />
+            </Link>
           </div>
-        </section>
 
-        {yesterdayComparison !== null && (
-          <div className={`flex items-center justify-between px-4 py-3 rounded-xl border font-bold text-sm transition-all ${
-            yesterdayComparison.diff > 0 ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-500"
-            : yesterdayComparison.diff < 0 ? "bg-rose-500/10 border-rose-500/30 text-rose-500"
-            : `${darkMode ? "bg-zinc-800/50 border-zinc-700 text-zinc-400" : "bg-zinc-100 border-zinc-200 text-zinc-500"}`
-          }`}>
-            <div className="flex items-center gap-2.5">
-              <TrendingUp className="w-4 h-4 shrink-0" />
-              <span>
-                {yesterdayComparison.diff > 0 ? `أفضل من أمس +${yesterdayComparison.diff}% 🔥`
-                  : yesterdayComparison.diff < 0 ? `أقل من أمس ${yesterdayComparison.diff}% ⚠️`
-                  : "نفس مستوى أمس 👍"}
-              </span>
-            </div>
-            <span className={`text-[10px] font-black uppercase tracking-widest hidden md:block ${muted}`}>مقارنة الأداء اليومي</span>
-          </div>
-        )}
-
-        {/* AI & Insights section... */}
-        <section className={`relative overflow-hidden border rounded-2xl md:rounded-[2.5rem] shadow-xl transition-all ${card}`}>
-          <div className="absolute top-0 right-0 w-56 h-56 bg-emerald-500/5 blur-[80px] rounded-full -translate-y-1/3 translate-x-1/3 pointer-events-none" />
-          <div className="p-4 sm:p-7 md:p-10 relative z-10 space-y-4 md:space-y-6">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 md:w-14 md:h-14 rounded-xl md:rounded-2xl border flex items-center justify-center shadow-inner ${cardInner} ${mutedBorder}`}>
-                  <Sparkles className="w-5 h-5 md:w-7 md:h-7 text-emerald-400 animate-pulse" />
+          <div className="flex flex-col items-center text-center z-10 px-14 sm:px-16 md:px-20">
+            <span className={`text-[11px] md:text-xs font-bold uppercase tracking-wider mb-1.5 ${muted}`}>
+              {new Intl.DateTimeFormat('ar-SA', { weekday: 'long' }).format(new Date())} {new Intl.DateTimeFormat('ar-SA', { day: 'numeric', month: 'long' }).format(new Date())}
+            </span>
+            <h1 className="text-2xl sm:text-3xl md:text-4xl font-black tracking-tight select-none touch-none bg-gradient-to-l from-emerald-400 to-cyan-400 bg-clip-text text-transparent pb-1">
+              مجموعة بن أحمد
+            </h1>
+            
+            <div className="flex flex-wrap items-center justify-center gap-2 mt-1">
+              {streak > 0 && (
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-orange-500/10 border border-orange-500/20 text-orange-500 rounded-full text-[10px] font-black tracking-wider shadow-sm">
+                  <Flame className="w-3.5 h-3.5" />
+                  <span className="pt-0.5">{streak} أيام متتالية</span>
                 </div>
-                <div><h2 className="text-lg md:text-2xl font-black">تحليل اليوم</h2><p className={`font-bold text-xs md:text-sm ${muted}`}>رؤية ذكية ومخصصة لأدائك</p></div>
-              </div>
-              <span className={`hidden md:inline-flex px-4 py-1.5 rounded-full text-xs font-black text-emerald-400 uppercase tracking-widest border ${cardInner} ${mutedBorder}`}>AI Active</span>
-            </div>
-            <div className="space-y-2">
-              <p className={`font-black text-[10px] uppercase tracking-widest flex items-center gap-2 ${muted}`}><TrendingUp className="w-3 h-3" /> أبرز التحليل</p>
-              {aiInsights.insights.length > 0 ? aiInsights.insights.map((msg, i) => (
-                <div key={i} className={`flex items-start gap-3 p-3 md:p-4 border rounded-xl md:rounded-2xl ${cardInner} ${mutedBorder}`}>
-                  <div className="mt-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                  <p className="font-bold text-sm md:text-base leading-relaxed">{msg}</p>
+              )}
+              {trialDaysLeft !== null && trialDaysLeft <= 7 && (
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-500 rounded-full text-[10px] font-bold tracking-wider shadow-sm">
+                  <span className="pt-0.5">متبقي {trialDaysLeft} أيام في التجربة</span>
                 </div>
-              )) : (
-                <div className={`p-3 border rounded-xl italic font-medium text-sm ${muted} ${cardInner} ${mutedBorder}`}>أكمل مهامك وعاداتك لتظهر التحليلات...</div>
               )}
             </div>
           </div>
-        </section>
+          
+          <div className="absolute left-0 top-1/2 -translate-y-1/2 z-20">
+            <button onClick={toggleTheme} className={`flex items-center justify-center w-10 h-10 md:w-11 md:h-11 rounded-full border transition-all ${
+              darkMode ? "bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-zinc-200" : "bg-white border-zinc-200 text-zinc-500 hover:text-zinc-700 shadow-sm"
+            }`}>
+              {darkMode ? <SunMedium className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </button>            
+          </div>
+        </header>
+
+        <DailyCoachCard 
+          tasksDone={tasksDoneCount} tasksTotal={tasks.length}
+          habitsDone={habitsDoneCount} habitsTotal={habits.length}
+          prayersDone={prayersDoneCount} 
+          quranDone={quran.current} quranTotal={quran.target}
+          adhkarDone={adhkarDoneCount}
+        />
 
         {/* 6 Summary Cards */}
         <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 md:gap-4">
@@ -419,7 +540,7 @@ export default function Home() {
             <section className={`border rounded-2xl md:rounded-3xl p-4 md:p-7 shadow-xl relative overflow-hidden transition-all ${card}`}>
               <div className="flex items-center gap-2 mb-4 md:mb-6">
                 <Star className="w-5 h-5 text-emerald-400" />
-                <h2 className="text-lg md:text-2xl font-bold">الالتزام الديني</h2>
+                <h2 className="text-xl md:text-2xl font-bold">الالتزام الديني</h2>
               </div>
               <div className="space-y-4">
                 <div className="grid grid-cols-5 gap-1.5">
@@ -482,14 +603,14 @@ export default function Home() {
             <section className={`border rounded-2xl md:rounded-3xl p-4 md:p-7 shadow-xl relative overflow-hidden transition-all ${card}`}>
               <div className="flex items-center gap-2 mb-4 md:mb-6">
                 <Activity className="w-5 h-5 text-rose-500" />
-                <h2 className="text-lg md:text-2xl font-bold">المتابعة الصحية</h2>
+                <h2 className="text-xl md:text-2xl font-bold">المتابعة الصحية</h2>
               </div>
               <div className="space-y-4">
                 {/* Water */}
-                <div className={`p-3 md:p-4 rounded-xl border flex flex-col gap-3 ${cardInner} ${mutedBorder}`}>
-                  <div className="flex items-center justify-between">
+                <div className={`p-4 md:p-5 rounded-xl border flex flex-col gap-3 ${cardInner} ${mutedBorder}`}>
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-2">
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-lg bg-cyan-500/10 flex items-center justify-center"><Droplets className="w-4 h-4 text-cyan-500" /></div>
+                      <div className="w-9 h-9 rounded-lg bg-cyan-500/10 flex items-center justify-center shrink-0"><Droplets className="w-4 h-4 text-cyan-500" /></div>
                       <div>
                         <h4 className="font-black text-sm">الماء</h4>
                         <div className={`flex items-center gap-1 text-[10px] font-bold ${muted}`}>
@@ -499,7 +620,7 @@ export default function Home() {
                         </div>
                       </div>
                     </div>
-                    <div className={`flex items-center gap-1.5 p-1 rounded-lg border ${darkMode ? "bg-zinc-900 border-zinc-800" : "bg-zinc-100 border-zinc-200"}`}>
+                    <div className={`flex items-center gap-1.5 p-1 rounded-lg border self-end sm:self-auto ${darkMode ? "bg-zinc-900 border-zinc-800" : "bg-zinc-100 border-zinc-200"}`}>
                       <button onClick={() => updateWater(-1)} className={`w-8 h-8 rounded-md flex items-center justify-center text-lg transition-colors ${darkMode ? "hover:bg-zinc-800" : "hover:bg-zinc-200"}`}>-</button>
                       <input type="number" value={water.current} onChange={(e) => setWater({...water, current: e.target.value ? Math.max(0, parseInt(e.target.value)) : '' as any})} className="w-10 text-center bg-transparent focus:outline-none font-black text-base text-cyan-500" />
                       <button onClick={() => updateWater(1)} className={`w-8 h-8 rounded-md flex items-center justify-center text-lg transition-colors ${darkMode ? "hover:bg-zinc-800" : "hover:bg-zinc-200"}`}>+</button>
@@ -509,10 +630,10 @@ export default function Home() {
                 </div>
 
                 {/* Calories */}
-                <div className={`p-3 md:p-4 rounded-xl border flex flex-col gap-3 ${cardInner} ${mutedBorder}`}>
-                  <div className="flex items-center justify-between">
+                <div className={`p-4 md:p-5 rounded-xl border flex flex-col gap-3 ${cardInner} ${mutedBorder}`}>
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-2">
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-lg bg-rose-500/10 flex items-center justify-center"><Flame className="w-4 h-4 text-rose-500" /></div>
+                      <div className="w-9 h-9 rounded-lg bg-rose-500/10 flex items-center justify-center shrink-0"><Flame className="w-4 h-4 text-rose-500" /></div>
                       <div>
                         <h4 className="font-black text-sm">السعرات</h4>
                         <div className={`flex items-center gap-1 text-[10px] font-bold ${muted}`}>
@@ -522,7 +643,7 @@ export default function Home() {
                         </div>
                       </div>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 w-full sm:w-auto self-end sm:self-auto justify-end">
                        <input type="number" placeholder="+ إدخال" value={calInput} onChange={e => setCalInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addCalories()} className={`w-20 text-xs px-2 py-1.5 rounded-lg border focus:outline-none focus:border-rose-500 text-center ${inputBg}`} />
                        <button onClick={addCalories} className="px-3 py-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-lg text-xs font-bold transition-all"><Plus className="w-4 h-4" /></button>
                     </div>
@@ -531,10 +652,10 @@ export default function Home() {
                 </div>
 
                 {/* Steps */}
-                <div className={`p-3 md:p-4 rounded-xl border flex flex-col gap-3 ${cardInner} ${mutedBorder}`}>
-                  <div className="flex items-center justify-between">
+                <div className={`p-4 md:p-5 rounded-xl border flex flex-col gap-3 ${cardInner} ${mutedBorder}`}>
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-2">
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-lg bg-purple-500/10 flex items-center justify-center"><Footprints className="w-4 h-4 text-purple-500" /></div>
+                      <div className="w-9 h-9 rounded-lg bg-purple-500/10 flex items-center justify-center shrink-0"><Footprints className="w-4 h-4 text-purple-500" /></div>
                       <div>
                         <h4 className="font-black text-sm">الخطوات</h4>
                         <div className={`flex items-center gap-1 text-[10px] font-bold ${muted}`}>
@@ -544,7 +665,7 @@ export default function Home() {
                         </div>
                       </div>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 w-full sm:w-auto self-end sm:self-auto justify-end">
                        <input type="number" placeholder="+ إدخال" value={stepInput} onChange={e => setStepInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addSteps()} className={`w-20 text-xs px-2 py-1.5 rounded-lg border focus:outline-none focus:border-purple-500 text-center ${inputBg}`} />
                        <button onClick={addSteps} className="px-3 py-1.5 bg-purple-500 hover:bg-purple-600 text-white rounded-lg text-xs font-bold transition-all"><Plus className="w-4 h-4" /></button>
                     </div>
@@ -590,7 +711,7 @@ export default function Home() {
               <div className="flex items-center justify-between mb-4 md:mb-6">
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="w-5 h-5 text-blue-500" />
-                  <h2 className="text-lg md:text-2xl font-bold">المهام</h2>
+                  <h2 className="text-xl md:text-2xl font-bold">المهام</h2>
                 </div>
               </div>
               <div className="space-y-2 relative">
@@ -650,7 +771,7 @@ export default function Home() {
             <section className={`border rounded-2xl md:rounded-3xl p-4 md:p-7 shadow-xl ${card}`}>
               <div className="flex items-center gap-2 mb-4 md:mb-6">
                 <Flame className="w-5 h-5 text-emerald-400" />
-                <h2 className="text-lg md:text-2xl font-bold">العادات</h2>
+                <h2 className="text-xl md:text-2xl font-bold">العادات</h2>
               </div>
               <div className="space-y-2">
                 {habits.length > 0 ? habits.map(habit => (
@@ -711,20 +832,6 @@ export default function Home() {
           </div>
         </div>
 
-        <div className={`flex items-center gap-3 md:gap-5 p-4 md:p-6 border rounded-2xl transition-all group/adv ${
-          darkMode ? "bg-zinc-900 border-zinc-800 hover:border-emerald-500/40" : "bg-white border-zinc-200 hover:border-emerald-400/50 shadow-sm"
-        }`}>
-          <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl bg-emerald-500/10 flex items-center justify-center shrink-0">
-            <Lightbulb className="w-5 h-5 md:w-6 md:h-6 text-emerald-400 group-hover/adv:scale-110 transition-transform" />
-          </div>
-          <div>
-            <p className={`font-black text-[9px] md:text-[10px] uppercase tracking-widest mb-0.5 ${muted}`}>نصيحة الغد</p>
-            <p className={`text-sm md:text-base font-bold leading-snug ${darkMode ? "text-zinc-200" : "text-zinc-700"}`}>
-              {aiInsights.tomorrowAdvice}
-            </p>
-          </div>
-        </div>
-
         <footer className={`text-center py-4 text-xs font-medium border-t ${mutedBorder} ${muted}`}>
           Developed by Omar Almajnuni
         </footer>
@@ -746,7 +853,7 @@ export default function Home() {
               ].map(level => (
                 <button
                   key={level.id}
-                  onClick={() => setKhushu(activeKhushuModal, level.id)}
+                  onClick={() => setKhushu(activeKhushuModal as string, level.id)}
                   className={`py-3.5 rounded-2xl text-zinc-950 text-lg font-black transition-all hover:scale-[1.02] active:scale-95 shadow-md ${level.color}`}
                 >
                   {level.id}
