@@ -97,6 +97,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { label: "التحليلات", path: "/admin/analytics", icon: <Activity className="w-5 h-5" /> },
     { label: "الاشتراكات", path: "/admin/subscriptions", icon: <CreditCard className="w-5 h-5" /> },
     { label: "طلبات الاشتراكات", path: "/admin/subscription-requests", icon: <MessageCircle className="w-5 h-5" /> },
+    { label: "الشكاوى والاقتراحات", path: "/admin/feedback", icon: <MessageCircle className="w-5 h-5" /> },
     { label: "الإعدادات", path: "/admin/settings", icon: <Settings className="w-5 h-5" /> },
     { label: "سجل العمليات", path: "/admin/logs", icon: <ScrollText className="w-5 h-5" /> },
   ];
