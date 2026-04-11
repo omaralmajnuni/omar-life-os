@@ -34,51 +34,62 @@ export function useTrialStatus() {
 
         const status = sub?.status || 'none';
 
-        if (status === 'trial') {
-          if (profile?.trial_ends_at) {
-            const remainingDays = Math.ceil((new Date(profile.trial_ends_at).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-            if (remainingDays > 0) {
-              setTrialDaysLeft(remainingDays);
-              setIsTrialExpired(false);
-            } else {
-              setTrialDaysLeft(0);
-              setIsTrialExpired(true);
-            }
-          } else {
-            setTrialDaysLeft(0);
-            setIsTrialExpired(true);
-          }
-        } 
-        else if (status === 'active' || status === 'activated' || status === 'permanent') {
+        // 1. Explicitly Expired or Inactive
+        if (status === 'expired' || status === 'inactive') {
+          setIsTrialExpired(true);
+          setTrialDaysLeft(0);
+          return;
+        }
+
+        // 2. Fully active cases
+        if (status === 'active' || status === 'activated' || status === 'permanent') {
           setIsTrialExpired(false);
-          if (sub?.ends_at) {
+          if (status !== 'permanent' && sub?.ends_at) {
             const remainingDays = Math.ceil((new Date(sub.ends_at).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-            if (remainingDays > 0) {
-              setTrialDaysLeft(remainingDays);
-            } else {
-              setTrialDaysLeft(0);
-              setIsTrialExpired(true);
-            }
+            setTrialDaysLeft(remainingDays > 0 ? remainingDays : 0);
+            if (remainingDays <= 0) setIsTrialExpired(true);
           } else {
-            setTrialDaysLeft(null); // غير محدد
+            setTrialDaysLeft(null); // permanent or unspecified active
           }
-        } 
-        else if (status === 'expired' || status === 'inactive') {
-          setIsTrialExpired(true);
+          return;
+        }
+
+        // 3. Autopilot Trial Logic for 'trial' or 'none' / Fresh Users
+        let endsAt = profile?.trial_ends_at;
+
+        // Automatically initialize 14-days Free Trial for completely new users seamlessly
+        if (!endsAt) {
+           const newEndDate = new Date();
+           newEndDate.setDate(newEndDate.getDate() + 14);
+           endsAt = newEndDate.toISOString();
+           
+           console.log("Auto-granting 14 days trial for NEW user:", session.user.id);
+
+           // Safely patch the profiles table
+           const { error: profileErr } = await supabase.from('profiles').update({ trial_ends_at: endsAt }).eq('user_id', session.user.id);
+           if (profileErr) console.error("Error setting trial in profile:", profileErr);
+           
+           // Ensure a matching 'subscriptions' record is dynamically bootstrapped
+           if (status === 'none') {
+             await supabase.from('subscriptions').insert({
+               user_id: session.user.id,
+               status: 'trial',
+               ends_at: endsAt
+             });
+           } else {
+             await supabase.from('subscriptions').update({ ends_at: endsAt, status: 'trial' }).eq('user_id', session.user.id);
+           }
+        }
+
+        // Compute Trial Validation Window
+        const remainingDays = Math.ceil((new Date(endsAt).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+        
+        if (remainingDays > 0) {
+          setTrialDaysLeft(remainingDays);
+          setIsTrialExpired(false);
+        } else {
           setTrialDaysLeft(0);
-        } 
-        else {
-          // If status is pending or none, try falling back to overall trial if they still have days
-          if (profile?.trial_ends_at) {
-            const remainingDays = Math.ceil((new Date(profile.trial_ends_at).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-            if (remainingDays > 0) {
-              setTrialDaysLeft(remainingDays);
-              setIsTrialExpired(false);
-              return;
-            }
-          }
-          setIsTrialExpired(true);
-          setTrialDaysLeft(0);
+          setIsTrialExpired(true); // Exact point of blocking the user!
         }
       } catch (err) {
         console.error("Error checking trial status:", err);

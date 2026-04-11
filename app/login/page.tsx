@@ -147,26 +147,45 @@ export default function LoginPage() {
       <div className="w-full max-w-md animate-in fade-in zoom-in-95 duration-500">
         
         {/* Header */}
-        <div className="text-center mb-10">
-          <div className="w-16 h-16 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-emerald-500/10 transition-colors">
+        <div className="text-center mb-8">
+          <div className="w-16 h-16 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-lg shadow-emerald-500/10 transition-colors">
             {mode === 'login' ? (
               <Lock className="w-8 h-8 text-emerald-500" />
             ) : (
               <UserPlus className="w-8 h-8 text-emerald-500" />
             )}
           </div>
-          <h1 className="text-3xl font-bold mb-2 tracking-tight">
-            {mode === 'login' ? 'تسجيل الدخول' : 'إنشاء حساب جديد'}
+          <h1 className="text-3xl font-black mb-2 tracking-tight">
+             مرحباً بك في LifeOS 🚀
           </h1>
-          <p className={classes.muted}>
-            {mode === 'login' 
-              ? 'مرحباً بعودتك! أدخل بياناتك للمتابعة.' 
-              : 'ابدأ رحلتك معنا وسجل بياناتك أدناه.'}
+          <p className={`${classes.muted} text-sm font-medium px-4`}>
+             منظومتك الشخصية لإدارة أهدافك وعاداتك اليومية بذكاء.
           </p>
         </div>
 
         {/* Card */}
-        <div className={`${classes.card} border rounded-3xl p-8 shadow-xl transition-all duration-300`}>
+        <div className={`${classes.card} border rounded-3xl p-6 md:p-8 shadow-xl transition-all duration-300`}>
+          
+          {/* Mode Switcher Tabs */}
+          <div className="flex bg-slate-100 dark:bg-zinc-800/80 p-1.5 rounded-2xl mb-8 border border-slate-200/50 dark:border-zinc-700/50 relative">
+             <button
+                type="button"
+                onClick={() => toggleMode()}
+                className={`flex-1 py-3 px-2 text-[15px] md:text-base font-bold rounded-xl transition-all flex justify-center items-center gap-2 ${mode === 'login' ? 'bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+             >
+                <Lock className="w-4 h-4" />
+                تسجيل الدخول
+             </button>
+             <button
+                type="button"
+                onClick={() => toggleMode()}
+                className={`flex-1 py-3 px-2 text-[15px] md:text-base font-bold rounded-xl transition-all flex justify-center items-center gap-2 ${mode === 'signup' ? 'bg-emerald-500 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+             >
+                <UserPlus className="w-4 h-4" />
+                إنشاء حساب جديد
+             </button>
+          </div>
+
           <form onSubmit={handleSubmit} className="space-y-6">
             
             {/* Messages */}
@@ -244,31 +263,20 @@ export default function LoginPage() {
             )}
 
             {/* Actions */}
-            <div className="pt-4 flex flex-col gap-4">
+            <div className="pt-2 flex flex-col gap-4">
               <button 
                 type="submit"
                 disabled={loading}
-                className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-70 disabled:cursor-not-allowed"
+                className="w-full bg-emerald-500 hover:bg-emerald-600 text-zinc-950 font-black py-4 px-4 text-lg rounded-2xl flex items-center justify-center gap-2 transition-all shadow-lg active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed"
               >
                 {loading ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <Loader2 className="w-6 h-6 animate-spin" />
                 ) : mode === 'login' ? (
-                  <ArrowRight className="w-5 h-5" />
+                  <ArrowRight className="w-6 h-6" />
                 ) : (
-                  <UserPlus className="w-5 h-5" />
+                  <UserPlus className="w-6 h-6" />
                 )}
-                {mode === 'login' ? 'تسجيل الدخول' : 'إنشاء الحساب'}
-              </button>
-
-              {/* Mode Toggle */}
-              <button 
-                type="button"
-                onClick={toggleMode}
-                className={`text-sm ${classes.muted} hover:text-emerald-500 transition-colors py-2 text-center`}
-              >
-                {mode === 'login' 
-                  ? 'ليس لديك حساب؟ قم بإنشاء حساب جديد' 
-                  : 'لديك حساب بالفعل؟ قم بتسجيل الدخول'}
+                {mode === 'login' ? 'الدخول للنظام' : 'إنشاء حسابي الآن'}
               </button>
             </div>
 
