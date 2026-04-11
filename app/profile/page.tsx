@@ -22,6 +22,11 @@ export default function ProfilePage() {
   const [showDevTools, setShowDevTools] = useState(false);
   const pressTimer = useRef<NodeJS.Timeout | null>(null);
 
+  // Feedback State
+  const [feedbackMsg, setFeedbackMsg] = useState("");
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackStatus, setFeedbackStatus] = useState<{type: 'success' | 'error', text: string} | null>(null);
+
   const [profile, setProfile] = useState({
     name: "",
     age: "",
@@ -31,8 +36,7 @@ export default function ProfilePage() {
     targetWeightLoss: "",
     targetWater: "",
     targetCalories: "",
-    targetSteps: "",
-    personalGoal: ""
+    targetSteps: ""
   });
 
   useEffect(() => {
@@ -90,18 +94,19 @@ export default function ProfilePage() {
         }
 
         if (profData) {
-          setProfile({
+          setProfile(prev => ({
+            ...prev,
             name: profData.name || "",
-            age: profData.age?.toString() || "",
+            age: profData.age ? profData.age.toString() : "",
             phone: profData.phone || "",
-            weight: profData.weight?.toString() || "",
-            height: profData.height?.toString() || "",
-            targetWeightLoss: profData.monthly_weight_goal?.toString() || profData.target_weight_loss?.toString() || "",
-            targetWater: profData.water_goal?.toString() || "",
-            targetCalories: profData.calories_goal?.toString() || "",
-            targetSteps: profData.steps_goal?.toString() || "",
+            weight: profData.weight ? profData.weight.toString() : "",
+            height: profData.height ? profData.height.toString() : "",
+            targetWeightLoss: profData.monthly_weight_goal ? profData.monthly_weight_goal.toString() : "",
+            targetWater: profData.water_goal ? profData.water_goal.toString() : "",
+            targetCalories: profData.calories_goal ? profData.calories_goal.toString() : "",
+            targetSteps: profData.steps_goal ? profData.steps_goal.toString() : "",
             personalGoal: profData.personal_goal || ""
-          });
+          }));
           if (profData.name && profData.age && profData.phone) setIsSaved(true);
         }
 
@@ -196,13 +201,7 @@ export default function ProfilePage() {
   };
 
   const handleSave = async () => {
-    setToastMsg("جاري حفظ البيانات...");
-    
-    // 3) الحقول الإلزامية
-    if (!profile.name || !profile.phone || !profile.age) {
-      alert("⚠️ الرجاء استكمال الحقول الأساسية الإلزامية (الاسم، العمر، رقم الجوال) للمتابعة!");
-      return;
-    }
+    setToastMsg("جاري الحفظ...");
     
     // 4) استخدم auth.getUser
     const { data: userData } = await supabase.auth.getUser();
@@ -243,7 +242,6 @@ export default function ProfilePage() {
         water_goal: profile.targetWater ? parseInt(profile.targetWater) : null,
         calories_goal: profile.targetCalories ? parseInt(profile.targetCalories) : null,
         steps_goal: profile.targetSteps ? parseInt(profile.targetSteps) : null,
-        personal_goal: profile.personalGoal || null,
         name: profile.name,
         phone: profile.phone,
         email: myProfile?.email || userData.user.email || null,
@@ -274,17 +272,49 @@ export default function ProfilePage() {
 
       setIsSaved(true);
       setShowToast(true);
-      setToastMsg("🔥 تم حفظ البيانات بنجاح واعتماد ملفك الشخصي!");
+      setToastMsg("🔥 تم حفظ البيانات بنجاح !");
 
       setTimeout(() => {
         setShowToast(false);
-        // Force redirect to Dashboard/Home after profile is complete
-        router.push('/');
-      }, 2000);
+      }, 3000);
       
     } catch (error) {
       console.error("Save profile error:", error);
       alert("حدث خطأ غير متوقع. الرجاء المحاولة مرة أخرى.");
+    }
+  };
+
+  const submitFeedback = async () => {
+    if (!feedbackMsg.trim()) return;
+    setFeedbackLoading(true);
+    setFeedbackStatus(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("لا توجد جلسة نشطة.");
+
+      const payload = {
+        user_id: session.user.id,
+        name: profile.name || session.user.email,
+        phone: profile.phone,
+        message: feedbackMsg.trim(),
+        type: 'complaint_or_suggestion',
+        status: 'new'
+      };
+
+      const { error } = await supabase.from('feedback').insert([payload]);
+      
+      if (error) throw error;
+
+      setFeedbackMsg("");
+      setFeedbackStatus({ type: 'success', text: "تم إرسال رسالتك بنجاح ✅" });
+      setTimeout(() => setFeedbackStatus(null), 4000);
+    } catch (err: any) {
+      console.error("Feedback insertion error:", err);
+      // Fallback message showing the table might not be ready but gracefully handles the UI.
+      setFeedbackStatus({ type: 'error', text: "لم نتمكن من الإرسال حالياً. سيتم تفعيل الميزة قريباً بواسطة الإدارة." });
+      setTimeout(() => setFeedbackStatus(null), 4000);
+    } finally {
+      setFeedbackLoading(false);
     }
   };
 
@@ -407,7 +437,7 @@ export default function ProfilePage() {
           <div className="space-y-4">
             <div>
               <label className="text-sm font-bold block mb-2 px-1 text-zinc-300">
-                الاسم <span className="text-rose-500">* إلزامي</span>
+                الاسم
               </label>
               <div className="relative">
                 <User className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-500" />
@@ -423,7 +453,7 @@ export default function ProfilePage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="text-sm font-bold block mb-2 px-1 text-zinc-300">
-                  العمر <span className="text-rose-500">* إلزامي</span>
+                  العمر
                 </label>
                 <div className="relative">
                   <input 
@@ -455,7 +485,7 @@ export default function ProfilePage() {
             </div>
             <div>
               <label className="text-sm font-bold block mb-2 px-1 text-zinc-300">
-                رقم الجوال <span className="text-rose-500">* إلزامي</span>
+                رقم الجوال
               </label>
               <div className="relative">
                 <input 
@@ -467,7 +497,7 @@ export default function ProfilePage() {
                   placeholder="+966500000000"
                 />
               </div>
-              <p className="text-xs text-zinc-500 mt-2 px-1">يُستخدم لتسجيل الدخول والتواصل في حال الدعم الفني.</p>
+              <p className="text-xs text-zinc-500 mt-2 px-1">يُستخدم للتواصل في حال الدعم الفني.</p>
             </div>
           </div>
         </section>
@@ -512,21 +542,39 @@ export default function ProfilePage() {
           </div>
         </section>
 
-        {/* Settings */}
+        {/* Complaints and Suggestions */}
         <section className={sectionClass}>
           <div className="flex items-center gap-2 mb-6">
-            <Settings className="w-5 h-5 text-purple-400" />
-            <h2 className="text-xl font-bold">إعدادات بسيطة</h2>
+            <Settings className="w-5 h-5 text-indigo-400" />
+            <h2 className="text-xl font-bold">الشكاوى والاقتراحات</h2>
           </div>
           <div className="space-y-4">
             <div>
-              <label className={labelClass}>هدف شخصي</label>
+              <p className="text-xs text-zinc-400 mb-3 px-1">
+                نستمع دائمًا إليك. شاركنا أي ملاحظة، شكوى أو اقتراح لتطوير تجربتك.
+              </p>
               <textarea
-                value={profile.personalGoal}
-                onChange={e => handleChange("personalGoal", e.target.value)}
-                className={`${inputClass} min-h-[100px] resize-none`}
-                placeholder="اكتب هدفك الشخصي هنا..."
+                value={feedbackMsg}
+                onChange={e => setFeedbackMsg(e.target.value)}
+                className={`${inputClass} min-h-[100px] resize-none pb-12`}
+                placeholder="اكتب رسالتك هنا بوضوح..."
               />
+              <div className="mt-3 flex flex-col gap-2">
+                <button
+                  onClick={submitFeedback}
+                  disabled={feedbackLoading || !feedbackMsg.trim()}
+                  className="w-full bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {feedbackLoading ? "جاري الإرسال..." : "إرسال الرسالة"}
+                </button>
+                {feedbackStatus && (
+                  <div className={`text-xs px-3 py-2 rounded-lg text-center font-bold ${
+                    feedbackStatus.type === 'success' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'
+                  }`}>
+                    {feedbackStatus.text}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </section>

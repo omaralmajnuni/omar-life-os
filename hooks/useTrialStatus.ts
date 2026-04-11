@@ -28,7 +28,7 @@ export function useTrialStatus(enforceProfile = true) {
 
         const { data: profile } = await supabase
           .from('profiles')
-          .select('trial_ends_at, name, phone, age')
+          .select('trial_ends_at, name, phone, age, weight')
           .eq('user_id', session.user.id)
           .maybeSingle();
 
@@ -36,11 +36,11 @@ export function useTrialStatus(enforceProfile = true) {
 
         // Profile Completion Interceptor
         if (enforceProfile) {
-          const profileIncomplete = !profile?.name || !profile?.phone || !profile?.age;
+          const profileIncomplete = !profile?.name || !profile?.phone || !profile?.age || !profile?.weight;
           if (profileIncomplete) {
-            console.log("Incomplete profile detected, forcing router intercept to /profile");
+            console.log("Incomplete profile detected, forcing router intercept to /onboarding");
             setIsCheckingTrial(false);
-            router.replace("/profile");
+            router.replace("/onboarding");
             return;
           }
         }
