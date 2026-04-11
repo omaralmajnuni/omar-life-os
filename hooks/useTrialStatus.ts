@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 
-export function useTrialStatus() {
+export function useTrialStatus(enforceProfile = true) {
   const router = useRouter();
   const [isTrialExpired, setIsTrialExpired] = useState(false);
   const [isCheckingTrial, setIsCheckingTrial] = useState(true);
@@ -28,11 +28,22 @@ export function useTrialStatus() {
 
         const { data: profile } = await supabase
           .from('profiles')
-          .select('trial_ends_at')
+          .select('trial_ends_at, name, phone, age')
           .eq('user_id', session.user.id)
           .maybeSingle();
 
         const status = sub?.status || 'none';
+
+        // Profile Completion Interceptor
+        if (enforceProfile) {
+          const profileIncomplete = !profile?.name || !profile?.phone || !profile?.age;
+          if (profileIncomplete) {
+            console.log("Incomplete profile detected, forcing router intercept to /profile");
+            setIsCheckingTrial(false);
+            router.replace("/profile");
+            return;
+          }
+        }
 
         // 1. Explicitly Expired or Inactive
         if (status === 'expired' || status === 'inactive') {

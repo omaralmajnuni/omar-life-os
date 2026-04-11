@@ -13,7 +13,7 @@ export default function ProfilePage() {
   const { classes, theme } = useTheme();
   const router = useRouter();
   const [isLoaded, setIsLoaded] = useState(false);
-  const { isTrialExpired, isCheckingTrial } = useTrialStatus();
+  const { isTrialExpired, isCheckingTrial } = useTrialStatus(false);
   const [showToast, setShowToast] = useState(false);
   const [toastMsg, setToastMsg] = useState("🔥 بداية قوية! تم حفظ بياناتك");
   const [isSaved, setIsSaved] = useState(false);
@@ -196,8 +196,11 @@ export default function ProfilePage() {
   };
 
   const handleSave = async () => {
-    if (!profile.phone || !profile.name) {
-      alert("الرجاء إدخال الاسم ورقم الجوال للتسجيل.");
+    setToastMsg("جاري حفظ البيانات...");
+    
+    // 3) الحقول الإلزامية
+    if (!profile.name || !profile.phone || !profile.age) {
+      alert("⚠️ الرجاء استكمال الحقول الأساسية الإلزامية (الاسم، العمر، رقم الجوال) للمتابعة!");
       return;
     }
     
@@ -264,27 +267,25 @@ export default function ProfilePage() {
       console.log("أي Error من Supabase:", upsertError);
 
       if (upsertError) {
-        console.error("Error updating profile:", upsertError);
-        alert(upsertError.message || "حدث خطأ في قاعدة البيانات");
+        console.error("Upsert Error:", upsertError);
+        alert("حدث خطأ أثناء الحفظ. الرجاء المحاولة مرة أخرى.");
         return;
       }
 
-      alert("تم حفظ بياناتك بنجاح ✅");
+      setIsSaved(true);
+      setShowToast(true);
+      setToastMsg("🔥 تم حفظ البيانات بنجاح واعتماد ملفك الشخصي!");
 
-    } catch (e: any) {
-      console.error("Unexpected error:", e);
-      alert(e.message || "حدث خطأ غير متوقع.");
-      return;
+      setTimeout(() => {
+        setShowToast(false);
+        // Force redirect to Dashboard/Home after profile is complete
+        router.push('/');
+      }, 2000);
+      
+    } catch (error) {
+      console.error("Save profile error:", error);
+      alert("حدث خطأ غير متوقع. الرجاء المحاولة مرة أخرى.");
     }
-
-    // Trial info is no longer persisted in local storage
-
-    setIsSaved(true);
-    setToastMsg("🔥 بداية قوية! تم حفظ بياناتك");
-    setShowToast(true);
-    setTimeout(() => {
-      setShowToast(false);
-    }, 3000);
   };
 
   const handleDevAction = (action: string) => {
@@ -405,18 +406,68 @@ export default function ProfilePage() {
           </div>
           <div className="space-y-4">
             <div>
-              <label className={labelClass}>الاسم</label>
-              <input type="text" value={profile.name} onChange={e => handleChange("name", e.target.value)} className={inputClass} placeholder="أدخل اسمك" />
+              <label className="text-sm font-bold block mb-2 px-1 text-zinc-300">
+                الاسم <span className="text-rose-500">* إلزامي</span>
+              </label>
+              <div className="relative">
+                <User className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-500" />
+                <input 
+                  type="text" 
+                  value={profile.name}
+                  onChange={e => setProfile({...profile, name: e.target.value})}
+                  className="w-full bg-zinc-900/50 border border-zinc-800 rounded-2xl py-3.5 px-4 pr-12 focus:outline-none focus:border-emerald-500 transition-colors text-white" 
+                  placeholder="اسمك الكامل"
+                />
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className={labelClass}>العمر</label>
-                <input type="number" value={profile.age} onChange={e => handleChange("age", e.target.value)} className={inputClass} placeholder="سنة" />
+                <label className="text-sm font-bold block mb-2 px-1 text-zinc-300">
+                  العمر <span className="text-rose-500">* إلزامي</span>
+                </label>
+                <div className="relative">
+                  <input 
+                    type="number" 
+                    value={profile.age}
+                    onChange={e => setProfile({...profile, age: e.target.value})}
+                    className="w-full bg-zinc-900/50 border border-zinc-800 rounded-2xl py-3.5 px-4 text-center focus:outline-none focus:border-emerald-500 transition-colors text-white font-mono" 
+                    placeholder="25"
+                  />
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm text-zinc-500">سنة</span>
+                </div>
               </div>
               <div>
-                <label className={labelClass}>رقم الجوال</label>
-                <input type="text" value={profile.phone} onChange={e => handleChange("phone", e.target.value)} className={inputClass} placeholder="05xxxxxxxx" />
+                <label className="text-sm font-bold block mb-2 px-1 text-zinc-300">
+                   الوزن الحالي
+                </label>
+                <div className="relative">
+                  <input 
+                    type="number" 
+                    step="0.1"
+                    value={profile.weight}
+                    onChange={e => setProfile({...profile, weight: e.target.value})}
+                    className="w-full bg-zinc-900/50 border border-zinc-800 rounded-2xl py-3.5 px-4 text-center focus:outline-none focus:border-emerald-500 transition-colors text-white font-mono" 
+                    placeholder="75.5"
+                  />
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm text-zinc-500">kg</span>
+                </div>
               </div>
+            </div>
+            <div>
+              <label className="text-sm font-bold block mb-2 px-1 text-zinc-300">
+                رقم الجوال <span className="text-rose-500">* إلزامي</span>
+              </label>
+              <div className="relative">
+                <input 
+                  type="tel" 
+                  dir="ltr"
+                  value={profile.phone}
+                  onChange={e => setProfile({...profile, phone: e.target.value})}
+                  className="w-full bg-zinc-900/50 border border-zinc-800 rounded-2xl py-3.5 px-4 text-left focus:outline-none focus:border-emerald-500 transition-colors text-white font-mono tracking-wider" 
+                  placeholder="+966500000000"
+                />
+              </div>
+              <p className="text-xs text-zinc-500 mt-2 px-1">يُستخدم لتسجيل الدخول والتواصل في حال الدعم الفني.</p>
             </div>
           </div>
         </section>
@@ -430,25 +481,18 @@ export default function ProfilePage() {
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className={labelClass}>الوزن الحالي</label>
-                <div className="relative">
-                  <input type="number" value={profile.weight} onChange={e => handleChange("weight", e.target.value)} className={inputClass} placeholder="0" />
-                  <span className={`absolute left-4 top-1/2 -translate-y-1/2 text-xs ${classes.muted} font-bold`}>كجم</span>
-                </div>
-              </div>
-              <div>
                 <label className={labelClass}>الطول</label>
                 <div className="relative">
                   <input type="number" value={profile.height} onChange={e => handleChange("height", e.target.value)} className={inputClass} placeholder="0" />
                   <span className={`absolute left-4 top-1/2 -translate-y-1/2 text-xs ${classes.muted} font-bold`}>سم</span>
                 </div>
               </div>
-            </div>
-            <div>
-              <label className={labelClass}>الهدف الشهري لنزول الوزن</label>
-              <div className="relative">
-                <input type="number" value={profile.targetWeightLoss} onChange={e => handleChange("targetWeightLoss", e.target.value)} className={inputClass} placeholder="0" />
-                <span className={`absolute left-4 top-1/2 -translate-y-1/2 text-xs ${classes.muted} font-bold`}>كجم</span>
+              <div>
+                <label className={labelClass}>الهدف الشهري لنزول الوزن</label>
+                <div className="relative">
+                  <input type="number" value={profile.targetWeightLoss} onChange={e => handleChange("targetWeightLoss", e.target.value)} className={inputClass} placeholder="0" />
+                  <span className={`absolute left-4 top-1/2 -translate-y-1/2 text-xs ${classes.muted} font-bold`}>كجم</span>
+                </div>
               </div>
             </div>
             <div className="grid grid-cols-3 gap-3">
